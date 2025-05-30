@@ -20,4 +20,6 @@ adk run
 
 # API server
 adk api_server
+
+streamlit run streamlit_app.py
 ```

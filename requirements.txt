@@ -1,2 +1,4 @@
-google-adk==1.0.0
-llama-index==0.12.35
+google-adk==1.1.1
+llama-index==0.12.38
+streamlit==1.45.1
+google-cloud-discoveryengine==0.13.8
