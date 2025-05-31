@@ -1,16 +1,24 @@
-import vertexai
+import os
+import time
+import uuid
+import asyncio
 import streamlit as st
 
 from dotenv import load_dotenv
 from vertexai.preview import rag
 from google.cloud import discoveryengine_v1 as discoveryengine
 from google.cloud import storage
-import os
-import time
-import uuid
+from google.genai import types
+from google.adk import Runner
+from google.adk.sessions import InMemorySessionService
+from human_resource_advisor.agent import cv_master_agent
 
 # Load environment variables from .env
 load_dotenv()
+
+session_service = InMemorySessionService()
+
+APP_NAME = "agents_app"
 
 # --- Google Cloud Client Initialization ---
 # These functions will initialize clients using Application Default Credentials.
@@ -53,7 +61,7 @@ def upload_to_gcs(bucket_name, file_obj, destination_blob_name):
         file_obj.seek(0)
         blob.upload_from_file(file_obj)
         gcs_uri = f"gs://{bucket_name}/{destination_blob_name}"
-        st.info(f"Uploaded {destination_blob_name} to {gcs_uri}")
+        # st.info(f"Uploaded {destination_blob_name} to {gcs_uri}")
         return gcs_uri
     except Exception as e:
         st.error(f"Error uploading {destination_blob_name} to GCS: {e}")
@@ -116,9 +124,58 @@ def get_rag_files(rag_name):
     return list(rag.list_files(corpus_name=rag_name))
 
 
+async def get_agent_session(user_id, session_id):
+    if session_id:
+        current_session = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+        if not current_session:
+            current_session = await session_service.create_session(app_name=APP_NAME, user_id=user_id)
+    else:
+        current_session = await session_service.create_session(app_name=APP_NAME, user_id=user_id)
+    return current_session
+
+
+async def talk_with_agents(rag_name: str, user_query: str, conversation_id: str):
+    current_session = await get_agent_session(conversation_id, conversation_id)
+
+    # --- Runner ---
+    # Key Concept: Runner orchestrates the agent execution loop.
+    runner = Runner(
+        agent=cv_master_agent(rag_name),  # The agent we want to run
+        app_name=APP_NAME,   # Associates runs with our app
+        session_service=session_service  # Uses our session manager
+    )
+
+    print(f"\n>>> User Query: {user_query}")
+
+    # Prepare the user's message in ADK format
+    content = types.Content(role='user', parts=[types.Part(text=user_query)])
+
+    final_response_text = ""
+
+    # Key Concept: run_async executes the agent logic and yields Events.
+    # We iterate through events to find the final answer.
+    async for event in runner.run_async(user_id=conversation_id, session_id=current_session.id, new_message=content):
+        # You can uncomment the line below to see *all* events during execution
+        # print(f"  [Event] Author: {event.author}, Type: {type(event).__name__}, Final: {event.is_final_response()}, Content: {event.content}")
+
+        # Key Concept: is_final_response() marks the concluding message for the turn.
+        if event.is_final_response():
+            if event.content and event.content.parts:
+                # Assuming text response in the first part
+                final_response_text = event.content.parts[0].text
+            elif event.actions and event.actions.escalate:  # Handle potential errors/escalations
+                final_response_text = f"Agent escalated: {event.error_message or 'No specific message.'}"
+            # Add more checks here if needed (e.g., specific error codes)
+            # await runner.close_session(current_session)
+            break
+
+    return final_response_text
+
+
 # --- Streamlit UI ---
 st.set_page_config(layout="wide", page_title="Resumes")
 st.title("📄 Chat with your CVs")
+
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
@@ -136,13 +193,16 @@ with st.sidebar:
         "- Indexing can take several minutes (or longer for many/large PDFs)."
     )
 
+
 # Initialize session state variables
+is_thinking = False
+is_indexing = False
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
 if "rag_corpus_name" not in st.session_state: # Store the full rag name
-    st.session_state.rag_corpus_name = None
+    st.session_state.rag_corpus_name = rag_name if rag_name else None
 
 
 # --- Main Page ---
@@ -153,12 +213,14 @@ uploaded_files = st.file_uploader(
 )
 
 
-if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not project_id or not gcs_bucket_name):
+if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not project_id or not gcs_bucket_name or is_indexing):
     if uploaded_files and project_id and gcs_bucket_name:
         with st.spinner("Starting indexing process... This may take a significant amount of time. Please be patient."):
+            is_indexing = True
             st.session_state.messages = [] # Reset chat on new indexing
             st.session_state.conversation_id = str(uuid.uuid4())
-            st.session_state.rag_corpus_name = None # Reset engine path
+            if not rag_name:
+                st.session_state.rag_corpus_name = None # Reset engine path
 
             all_gcs_uris = []
             try:
@@ -174,7 +236,7 @@ if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not proje
                     st.error("No files were successfully uploaded to GCS. Aborting.")
                     st.stop()
                 st.success(f"Successfully uploaded {len(all_gcs_uris)} files to GCS.")
-                st.expander("See GCS URIs").json(all_gcs_uris)
+                # st.expander("See GCS URIs").json(all_gcs_uris)
 
                 # 2. Create RAG (if it does not exist)
                 if not rag_name:
@@ -192,11 +254,21 @@ if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not proje
                         st.balloons()
                         st.success("🎉 All setup and indexing steps initiated! You can now try chatting below.")
                         st.session_state.rag_corpus_name = rag_name
-
+                is_indexing = False
             except Exception as e:
                 st.error(f"An error occurred during the indexing process: {e}")
                 st.exception(e) # Print full traceback for debugging
                 st.session_state.rag_corpus_name = None # Mark as not ready
+                is_indexing = False
+
+
+if st.button("🧹 Clean", disabled=not st.session_state.rag_corpus_name or is_thinking):
+    with st.spinner("Cleaning ..."):
+        if st.session_state.rag_corpus_name:
+            delete_rag(st.session_state.rag_corpus_name)
+            st.session_state.rag_corpus_name = None
+            rag_name = None
+
 
 # --- Chat Interface ---
 st.markdown("---")
@@ -210,7 +282,7 @@ else:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask a question about your documents..."):
+    if prompt := st.chat_input("Ask a question about your documents...", disabled=is_thinking):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -219,9 +291,12 @@ else:
             message_placeholder = st.empty()
             full_response_text = ""
             try:
-                pass
-                # with st.spinner("Thinking..."):
-                #    response = conv_client.converse_conversation(request=request)
+                with st.spinner("Thinking..."):
+                    is_thinking = True
+                    full_response_text = asyncio.run(talk_with_agents(st.session_state.rag_corpus_name,
+                                                                      prompt,
+                                                                      st.session_state.conversation_id))
+                    is_thinking = False
 
                 # The API response includes the updated conversation resource name,
                 # which might be useful if the conversation ID changes (though typically it doesn't for ongoing sessions).

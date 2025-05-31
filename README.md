@@ -12,6 +12,9 @@ pip install -r requirements.txt
 
 ## Run
 ```
+# Web chat app
+streamlit run streamlit_app.py
+
 # Dev UI
 adk web
 
@@ -20,6 +23,4 @@ adk run
 
 # API server
 adk api_server
-
-streamlit run streamlit_app.py
 ```
