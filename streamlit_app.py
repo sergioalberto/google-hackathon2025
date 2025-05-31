@@ -172,28 +172,6 @@ async def talk_with_agents(rag_name: str, user_query: str, conversation_id: str)
     return final_response_text
 
 
-# --- Streamlit UI ---
-st.set_page_config(layout="wide", page_title="Resumes")
-st.title("📄 Chat with your CVs")
-
-
-# --- Sidebar for Configuration ---
-with st.sidebar:
-    st.header("⚙️ Configuration")
-
-    project_id = st.text_input("Google Cloud Project ID", value=os.environ.get("GOOGLE_CLOUD_PROJECT", ""), help="Your Google Cloud Project ID.")
-    gcs_bucket_name = st.text_input("GCS Bucket Name", value=os.environ.get("GCS_BUCKET_NAME", ""), help="GCS bucket to upload PDFs to (must exist and be accessible).")
-    rag_name = st.text_input("RAG Patch Name", value=os.environ.get("RAG_CORPUS", ""), help="If you want to use a specific RAG")
-
-    st.markdown("---")
-    st.markdown(
-        "**Important Notes:**\n"
-        "- Ensure the GCS bucket exists and you have permissions.\n"
-        "- The Vertex AI Search and Discovery API must be enabled in your project.\n"
-        "- Indexing can take several minutes (or longer for many/large PDFs)."
-    )
-
-
 # Initialize session state variables
 is_thinking = False
 is_indexing = False
@@ -202,80 +180,89 @@ if "messages" not in st.session_state:
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
 if "rag_corpus_name" not in st.session_state: # Store the full rag name
-    st.session_state.rag_corpus_name = rag_name if rag_name else None
+    st.session_state.rag_corpus_name = os.environ.get("RAG_CORPUS", "")
 
 
-# --- Main Page ---
-st.header("1. Upload and Index Resumes (PDFs)")
-uploaded_files = st.file_uploader(
-    "Upload your PDF documents", type="pdf", accept_multiple_files=True,
-    help="Upload one or more PDF files to be indexed."
-)
+# --- Streamlit UI ---
+st.set_page_config(layout="wide", page_title="Resumes")
+st.title("💬 Chat with your CVs")
+
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME", "")
+
+# --- Sidebar for Configuration ---
+with st.sidebar:
+    st.header("📄 Upload and Index Resumes (PDFs)")
+
+    uploaded_files = st.file_uploader(
+        "Upload your PDF documents",
+        key="uploaded_files",
+        type="pdf",
+        accept_multiple_files=True,
+        help="Upload one or more PDF files to be indexed."
+    )
+
+    if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not project_id or not gcs_bucket_name or is_indexing):
+        if uploaded_files and len(uploaded_files) <= 25 and project_id and gcs_bucket_name:
+            with st.spinner("Starting indexing process... This may take a significant amount of time. Please be patient."):
+                is_indexing = True
+                st.session_state.messages = [] # Reset chat on new indexing
+                st.session_state.conversation_id = str(uuid.uuid4())
+
+                all_gcs_uris = []
+                try:
+                    # 1. Upload files to GCS
+                    st.info(f"Uploading {len(uploaded_files)} files to GCS bucket: {gcs_bucket_name} ...")
+                    for i, uploaded_file in enumerate(uploaded_files):
+                        # Sanitize file name for GCS
+                        safe_file_name = "".join(c if c.isalnum() or c in ['.', '_', '-'] else '_' for c in uploaded_file.name)
+                        destination_blob_name = f"rag_uploads/{safe_file_name}"
+                        gcs_uri = upload_to_gcs(gcs_bucket_name, uploaded_file, destination_blob_name)
+                        all_gcs_uris.append(gcs_uri)
+                    if not all_gcs_uris:
+                        st.error("No files were successfully uploaded to GCS. Aborting.")
+                        st.stop()
+                    st.success(f"Successfully uploaded {len(all_gcs_uris)} files to GCS.")
+                    # st.expander("See GCS URIs").json(all_gcs_uris)
+
+                    # 2. Create RAG (if it does not exist)
+                    if not st.session_state.rag_corpus_name:
+                        st.info(f"Setting up RAG ...")
+                        my_rag = create_rag("RAG for CVs")
+                        if my_rag:
+                            st.session_state.rag_corpus_name = my_rag.name
+                            st.success(f"RAG {my_rag.name} created.")
+
+                    # 3. Import Documents
+                    if st.session_state.rag_corpus_name:
+                        st.info(f"Importing documents into RAG '{st.session_state.rag_corpus_name}' ...")
+                        result = import_gcs_files(st.session_state.rag_corpus_name, all_gcs_uris)
+                        if result and result.failed_rag_files_count == 0:
+                            st.balloons()
+                            st.success("🎉 All setup and indexing steps initiated! You can now try chatting.")
+                    is_indexing = False
+                except Exception as e:
+                    st.error(f"An error occurred during the indexing process: {e}")
+                    st.exception(e) # Print full traceback for debugging
+                    st.session_state.rag_corpus_name = None # Mark as not ready
+                    is_indexing = False
+        else:
+            st.warning("Please ensure you have uploaded maximum 25 files.")
 
 
-if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not project_id or not gcs_bucket_name or is_indexing):
-    if uploaded_files and project_id and gcs_bucket_name:
-        with st.spinner("Starting indexing process... This may take a significant amount of time. Please be patient."):
-            is_indexing = True
-            st.session_state.messages = [] # Reset chat on new indexing
-            st.session_state.conversation_id = str(uuid.uuid4())
-            if not rag_name:
-                st.session_state.rag_corpus_name = None # Reset engine path
-
-            all_gcs_uris = []
-            try:
-                # 1. Upload files to GCS
-                st.subheader(f"Step 1: Uploading {len(uploaded_files)} files to GCS bucket: {gcs_bucket_name}")
-                for i, uploaded_file in enumerate(uploaded_files):
-                    # Sanitize file name for GCS
-                    safe_file_name = "".join(c if c.isalnum() or c in ['.', '_', '-'] else '_' for c in uploaded_file.name)
-                    destination_blob_name = f"rag_uploads/{safe_file_name}"
-                    gcs_uri = upload_to_gcs(gcs_bucket_name, uploaded_file, destination_blob_name)
-                    all_gcs_uris.append(gcs_uri)
-                if not all_gcs_uris:
-                    st.error("No files were successfully uploaded to GCS. Aborting.")
-                    st.stop()
-                st.success(f"Successfully uploaded {len(all_gcs_uris)} files to GCS.")
-                # st.expander("See GCS URIs").json(all_gcs_uris)
-
-                # 2. Create RAG (if it does not exist)
-                if not rag_name:
-                    st.subheader(f"Step 2: Setting up RAG")
-                    my_rag = create_rag("RAG for CVs")
-                    if my_rag:
-                        rag_name = my_rag.name
-                        st.success(f"RAG {rag_name} created.")
-
-                # 3. Import Documents
-                if rag_name:
-                    st.subheader(f"Step 3: Importing documents into RAG '{rag_name}'")
-                    result = import_gcs_files(rag_name, all_gcs_uris)
-                    if result and result.failed_rag_files_count == 0:
-                        st.balloons()
-                        st.success("🎉 All setup and indexing steps initiated! You can now try chatting below.")
-                        st.session_state.rag_corpus_name = rag_name
-                is_indexing = False
-            except Exception as e:
-                st.error(f"An error occurred during the indexing process: {e}")
-                st.exception(e) # Print full traceback for debugging
-                st.session_state.rag_corpus_name = None # Mark as not ready
-                is_indexing = False
-
-
-if st.button("🧹 Clean", disabled=not st.session_state.rag_corpus_name or is_thinking):
-    with st.spinner("Cleaning ..."):
-        if st.session_state.rag_corpus_name:
-            delete_rag(st.session_state.rag_corpus_name)
-            st.session_state.rag_corpus_name = None
-            rag_name = None
+    if st.button("🧹 Clean", disabled=not st.session_state.rag_corpus_name or is_thinking):
+        with st.spinner("Cleaning ..."):
+            if st.session_state.rag_corpus_name:
+                delete_rag(st.session_state.rag_corpus_name)
+                st.session_state.rag_corpus_name = None
+                # TODO - Clean up GCS files as well
 
 
 # --- Chat Interface ---
 st.markdown("---")
-st.header("💬 Chat with your Resumes")
 
 if not st.session_state.get("rag_corpus_name"):
-    st.info("☝️ Please upload and successfully index your PDF files first to enable the chat.")
+    st.info("👈 Please upload and successfully index your PDF files first to enable the chat.")
 else:
     # Display chat messages
     for message in st.session_state.messages:
@@ -309,4 +296,4 @@ else:
         st.session_state.messages.append({"role": "assistant", "content": full_response_text})
 
 st.sidebar.markdown("---")
-st.sidebar.info("This app demonstrates RAG using Vertex AI Search.")
+st.sidebar.info("This app demonstrates RAG using Vertex AI Search with the ADK.")
