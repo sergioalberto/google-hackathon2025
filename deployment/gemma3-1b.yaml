@@ -1,0 +1,56 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: gemma3-1b
+  generation: 1
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/client-name: gcloud
+    run.googleapis.com/client-version: 523.0.1
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+    run.googleapis.com/urls: '["https://gemma3-1b-570351480416.us-central1.run.app","https://gemma3-1b-2c22wctj5a-uc.a.run.app"]'
+spec:
+  template:
+    metadata:
+      labels:
+        client.knative.dev/nonce: hzlwiwwjdn
+        run.googleapis.com/startupProbeType: Default
+      annotations:
+        autoscaling.knative.dev/maxScale: '1'
+        run.googleapis.com/client-name: gcloud
+        run.googleapis.com/client-version: 523.0.1
+        run.googleapis.com/gpu-zonal-redundancy-disabled: 'true'
+        run.googleapis.com/cpu-throttling: 'false'
+        run.googleapis.com/startup-cpu-boost: 'true'
+    spec:
+      containerConcurrency: 2
+      timeoutSeconds: 600
+      serviceAccountName: 570351480416-compute@developer.gserviceaccount.com
+      containers:
+      - image: us-docker.pkg.dev/cloudrun/container/gemma/gemma3-1b
+        ports:
+        - name: http1
+          containerPort: 8080
+        env:
+        - name: OLLAMA_NUM_PARALLEL
+          value: '2'
+        - name: API_KEY
+          value: {YOUR_API_KEY}
+        resources:
+          limits:
+            cpu: '4'
+            nvidia.com/gpu: '1'
+            memory: 16Gi
+        startupProbe:
+          timeoutSeconds: 240
+          periodSeconds: 240
+          failureThreshold: 1
+          tcpSocket:
+            port: 8080
+      nodeSelector:
+        run.googleapis.com/accelerator: nvidia-l4
+  traffic:
+  - percent: 100
+    latestRevision: true
