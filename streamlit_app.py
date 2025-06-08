@@ -195,7 +195,7 @@ with st.sidebar:
     st.header("📄 Upload and Index Resumes (PDFs)")
 
     uploaded_files = st.file_uploader(
-        "Upload your PDF documents",
+        "Upload your PDF documents (recommended that the file name be the same as the CV name)",
         key="uploaded_files",
         type="pdf",
         accept_multiple_files=True,
