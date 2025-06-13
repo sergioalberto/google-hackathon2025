@@ -32,7 +32,7 @@ adk api_server
 ```
 
 ## Test it
-- Upload files from eval/data folder (except `New Job Profile.pdf` file)
+- Upload files (CVs) from eval/data folder (except `New Job Profile.pdf` file)
 - Click on `Index Uploaded CVs` button
 - Wait for a couple seconds, until the chat input is enabled
 - Ask questions like:
