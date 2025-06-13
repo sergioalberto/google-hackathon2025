@@ -195,7 +195,7 @@ with st.sidebar:
     st.header("📄 Upload and Index Resumes (PDFs)")
 
     uploaded_files = st.file_uploader(
-        "Upload your PDF documents (recommended that the file name be the same as the CV name)",
+        "Upload your PDF documents (recommended that the file name be the same as the CV candidate name)",
         key="uploaded_files",
         type="pdf",
         accept_multiple_files=True,
@@ -269,7 +269,7 @@ else:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask a question about your documents...", disabled=is_thinking):
+    if prompt := st.chat_input("Ask a question about your resumes...", disabled=is_thinking):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)

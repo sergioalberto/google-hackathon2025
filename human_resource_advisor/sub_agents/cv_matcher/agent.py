@@ -5,7 +5,7 @@ from vertexai import rag
 
 def cv_matcher_agent(rag_name_id: str, model="gemini-2.0-flash"):
     cv_vertex_retrieval = VertexAiRagRetrieval(
-        name='retrieve_rag_cv_documentation',
+        name='retrieve_rag_cv_matcher',
         description=(
             'Use this tool to retrieve CV documentation and reference materials for the question from the RAG corpus'
         ),
@@ -22,7 +22,7 @@ def cv_matcher_agent(rag_name_id: str, model="gemini-2.0-flash"):
     )
 
     return LlmAgent(
-        name="CVMatcherAgent",
+        name="cv_matcher_agent",
         model=model,
         description="Answers any user question about resumes",
         instruction="""

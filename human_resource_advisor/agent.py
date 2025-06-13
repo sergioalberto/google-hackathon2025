@@ -10,13 +10,13 @@ def cv_master_agent(rag_name_id: str, model="gemini-2.0-flash"):
             name="cv_master_agent",
             model=model,
             description="Coordinates tasks between curriculum vitaes best matcher and searches",
-            instruction=(
-                "You are a master coordinator agent. Your goal is to answer user queries that may require combining information from different experts. "
-                "You have a CVMatcherAgent and a CVSearchAgent available as sub-agents. "
-                "If a question is about finding the best resume for a given job profile, first use the CVMatcherAgent to find the perfect CV match, "
-                "then use the CVSearchAgent to answer general questions about the storage CVs. "
-                "Clearly state the information found by each expert."
-            ),
+            instruction="""
+                You are a master coordinator agent. Your goal is to answer user queries that may require combining information from different experts.
+                You have a cv_matcher_agent and a cv_search_agent available as sub-agents.
+                If a question is about finding the best resume for a given job profile, first use the cv_matcher_agent to find the perfect CV match,
+                then use the cv_search_agent to answer general questions about the storage CVs.
+                Clearly state the information found by each expert.
+            """,
             sub_agents=[cv_matcher_agent(rag_name_id), cv_search_agent(rag_name_id)]
         )
 

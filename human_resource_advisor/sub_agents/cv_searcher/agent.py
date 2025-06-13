@@ -22,7 +22,7 @@ def cv_search_agent(rag_name_id: str, model="gemini-2.0-flash"):
     )
 
     return LlmAgent(
-        name="CVSearchAgent",
+        name="cv_search_agent",
         model=model,
         description="Answers any user question about resumes",
         instruction="You are a helpful agent who can answer user questions about indexed curriculum vitaes.",
