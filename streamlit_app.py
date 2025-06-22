@@ -202,7 +202,7 @@ with st.sidebar:
         help="Upload one or more PDF files to be indexed."
     )
 
-    if st.button("🚀 Index Uploaded CVs", disabled=not uploaded_files or not project_id or not gcs_bucket_name or is_indexing):
+    if st.button("🚀 Upload files", disabled=not uploaded_files or not project_id or not gcs_bucket_name or is_indexing):
         if uploaded_files and len(uploaded_files) <= 25 and project_id and gcs_bucket_name:
             with st.spinner("Starting indexing process... This may take a significant amount of time. Please be patient."):
                 is_indexing = True

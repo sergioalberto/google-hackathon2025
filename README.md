@@ -1,6 +1,7 @@
 # Google Hackathon 2025
 A perfect resume for a given job profile using Google ADK
 
+Watch the video demo on [YouTube](https://youtu.be/uIaFiwqOtPo)
 
 ## Setup
 ```
